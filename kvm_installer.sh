@@ -94,7 +94,7 @@ start_conversion() {
     # Kill existing session if running
     screen -S kvm_vm -X quit > /dev/null 2>&1
 
-    # Launch QEMU inside a detached screen session with full container support
+    # Launch QEMU inside a detached screen session with working TTY serial console
     screen -dmS kvm_vm qemu-system-x86_64 \
         $KVM_ACCEL \
         -cpu qemu64 \
@@ -105,7 +105,9 @@ start_conversion() {
         -cdrom ubuntu-22.04.iso \
         -boot d \
         -net nic -net user,hostfwd=tcp::2222-:22 \
-        -nographic
+        -nographic \
+        -serial mon:stdio \
+        -append "console=ttyS0 quiet"
 
     sleep 2
 
@@ -114,13 +116,12 @@ start_conversion() {
         echo -e "\n${GREEN}====================================================${NC}"
         echo -e "${GREEN} SUCCESS: Ubuntu 22.04 KVM VM is running!${NC}"
         echo -e "${YELLOW} Connection Info:${NC}"
-        echo -e "   - SSH Forwarded Port : 2222 (ssh -p 2222 user@your-vps-ip)"
-        echo -e "   - Open VM Console    : 'screen -r kvm_vm'"
+        echo -e "   - Open VM Installer : 'screen -r kvm_vm'"
         echo -e "   - Detach from Console: Press 'Ctrl + A' then 'D'"
+        echo -e "   - SSH Forwarded Port : 2222 (after setup finishes)"
         echo -e "${GREEN}====================================================${NC}"
     else
-        echo -e "\n${RED}[ERROR] VM failed to start inside container background. Run direct check:${NC}"
-        echo -e "cd ~/kvm_vm && qemu-system-x86_64 -cpu qemu64 -m ${RAM_SIZE}M -hda ubuntu_disk.qcow2 -cdrom ubuntu-22.04.iso -nographic"
+        echo -e "\n${RED}[ERROR] VM failed to start inside container background.${NC}"
     fi
 }
 
