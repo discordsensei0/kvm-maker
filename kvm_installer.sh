@@ -42,15 +42,15 @@ start_conversion() {
 
     # Inputs from user directly from TTY
     read -p "Enter Host Name [default: ubuntu-kvm]: " HOST_NAME < /dev/tty
-    read -p "Enter RAM Memory in MB [default: 2048]: " RAM_SIZE < /dev/tty
-    read -p "Enter Disk Size in GB [default: 20]: " DISK_SIZE < /dev/tty
-    read -p "Enter CPU Cores [default: 2]: " CPU_CORES < /dev/tty
+    read -p "Enter RAM Memory in MB [default: 1024]: " RAM_SIZE < /dev/tty
+    read -p "Enter Disk Size in GB [default: 10]: " DISK_SIZE < /dev/tty
+    read -p "Enter CPU Cores [default: 1]: " CPU_CORES < /dev/tty
 
-    # Set defaults if empty
+    # Set conservative defaults to prevent memory limits in containers
     HOST_NAME=${HOST_NAME:-ubuntu-kvm}
-    RAM_SIZE=${RAM_SIZE:-2048}
-    DISK_SIZE=${DISK_SIZE:-20}
-    CPU_CORES=${CPU_CORES:-2}
+    RAM_SIZE=${RAM_SIZE:-1024}
+    DISK_SIZE=${DISK_SIZE:-10}
+    CPU_CORES=${CPU_CORES:-1}
 
     echo -e "\n${YELLOW}=== Machine Specs Summary ===${NC}"
     echo -e "Hostname  : $HOST_NAME"
@@ -80,48 +80,49 @@ start_conversion() {
         wget -O ubuntu-22.04.iso "$ISO_URL"
     fi
 
-    echo -e "${GREEN}[4/4] Starting KVM Virtual Machine...${NC}"
+    echo -e "${GREEN}[4/4] Starting Virtual Machine Engine...${NC}"
     
-    # Check if hardware acceleration /dev/kvm is available
-    KVM_ACCEL=""
+    # Configure acceleration mode
+    ACCEL_ARGS="-machine type=pc,accel=tcg -cpu qemu64"
     if [ -c /dev/kvm ]; then
-        KVM_ACCEL="-enable-kvm"
-        echo -e "${GREEN}[INFO] /dev/kvm detected! Hardware acceleration enabled.${NC}"
+        ACCEL_ARGS="-enable-kvm -cpu host"
+        echo -e "${GREEN}[INFO] /dev/kvm detected! Using KVM Hardware Acceleration.${NC}"
     else
-        echo -e "${YELLOW}[WARNING] /dev/kvm not available. Falling back to container software emulation.${NC}"
+        echo -e "${YELLOW}[WARNING] /dev/kvm not found. Using TCG Software Emulation Mode.${NC}"
     fi
 
     # Kill existing session if running
     screen -S kvm_vm -X quit > /dev/null 2>&1
 
-    # Launch QEMU inside a detached screen session with working TTY serial console
+    # Launch QEMU with guaranteed container compatibility
     screen -dmS kvm_vm qemu-system-x86_64 \
-        $KVM_ACCEL \
-        -cpu qemu64 \
+        $ACCEL_ARGS \
         -name "$HOST_NAME" \
         -m "${RAM_SIZE}M" \
         -smp "$CPU_CORES" \
         -hda ubuntu_disk.qcow2 \
         -cdrom ubuntu-22.04.iso \
         -boot d \
-        -net nic -net user,hostfwd=tcp::2222-:22 \
+        -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+        -device virtio-net-pci,netdev=net0 \
         -nographic \
-        -serial mon:stdio \
-        -append "console=ttyS0 quiet"
+        -serial mon:stdio
 
-    sleep 2
+    sleep 3
 
-    # Check if process survived launch
+    # Verify container process status
     if screen -list | grep -q "kvm_vm"; then
         echo -e "\n${GREEN}====================================================${NC}"
-        echo -e "${GREEN} SUCCESS: Ubuntu 22.04 KVM VM is running!${NC}"
-        echo -e "${YELLOW} Connection Info:${NC}"
-        echo -e "   - Open VM Installer : 'screen -r kvm_vm'"
-        echo -e "   - Detach from Console: Press 'Ctrl + A' then 'D'"
-        echo -e "   - SSH Forwarded Port : 2222 (after setup finishes)"
+        echo -e "${GREEN} SUCCESS: Ubuntu 22.04 VM is now active!${NC}"
+        echo -e "${YELLOW} Connection & Control:${NC}"
+        echo -e "   - Connect to Installer Console : screen -r kvm_vm"
+        echo -e "   - Exit Console without Stopping: Press 'Ctrl + A' then 'D'"
+        echo -e "   - SSH Access Port             : 2222 (Post-Installation)"
         echo -e "${GREEN}====================================================${NC}"
     else
-        echo -e "\n${RED}[ERROR] VM failed to start inside container background.${NC}"
+        echo -e "\n${RED}[ERROR] VM failed to launch inside screen session.${NC}"
+        echo -e "${YELLOW}Run standard direct output to debug container limits:${NC}"
+        echo -e "cd ~/kvm_vm && qemu-system-x86_64 -machine type=pc,accel=tcg -m 1024 -hda ubuntu_disk.qcow2 -cdrom ubuntu-22.04.iso -nographic"
     fi
 }
 
@@ -130,7 +131,7 @@ check_status() {
     show_credits
     if screen -list | grep -q "kvm_vm"; then
         echo -e "${GREEN}[STATUS] Virtual Machine is currently RUNNING.${NC}"
-        echo -e "Attach to console using: 'screen -r kvm_vm'"
+        echo -e "Attach to interactive console using: 'screen -r kvm_vm'"
     else
         echo -e "${RED}[STATUS] No active VM session detected.${NC}"
     fi
